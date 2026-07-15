@@ -1,0 +1,42 @@
+[project]
+name = "datalabeller"
+version = "0.1.0"
+description = "Decoupled rosbag -> SAM 3 -> CVAT -> COCO auto-labeling pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "rosbags>=0.9.20",
+    "pycocotools>=2.0.7",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# Installed only in the SAM 3 image; kept out of the extraction env on purpose.
+# The facebookresearch/sam3 package itself is installed from git in the image
+# (it is not on PyPI); these are the surrounding runtime deps.
+sam3 = [
+    "torch>=2.7",
+    "torchvision",
+    "pillow",
+]
+# Programmatic CVAT round-trip (Stage 3). Talks to a separately-running CVAT
+# server over HTTP; pure-python, safe to add to the extraction env.
+cvat = [
+    "cvat-sdk>=2.0",
+]
+dev = [
+    "pytest>=7.4",
+]
+
+[project.scripts]
+datalabeller = "datalabeller.cli:cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

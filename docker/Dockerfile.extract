@@ -1,0 +1,19 @@
+# Stage 1 (extraction) + Stage 3 (CVAT round-trip) + Stage 4 (packaging).
+# No ROS install: the `rosbags` package reads .bag/.db3/.mcap directly.
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml ./
+COPY src ./src
+COPY scripts ./scripts
+COPY tests ./tests
+# [cvat] adds cvat-sdk for the automated Stage 3 round-trip; [dev] adds pytest.
+RUN pip install --no-cache-dir ".[cvat,dev]"
+
+# Bags and outputs are bind-mounted at runtime (see docker-compose.yml).
+ENTRYPOINT ["datalabeller"]
+CMD ["--help"]

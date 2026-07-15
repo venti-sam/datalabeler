@@ -1,0 +1,83 @@
+# Single config spanning all four stages. Copy to pipeline.yaml and edit.
+# Paths may reference ${workdir}; it is expanded at load time.
+
+paths:
+  # One or more bag paths or globs. ROS 1 (.bag) and ROS 2 (.db3/.mcap) both
+  # work via the `rosbags` package — no sourced ROS install needed.
+  bags:
+    - "data/bags/*.bag"
+  workdir: "work"
+  images: "${workdir}/images"           # Stage 1 output
+  annotations: "${workdir}/annotations" # canonical per-frame COCO (stages 2-3)
+  dataset: "${workdir}/dataset"         # Stage 4 packaged (image,label) pairs
+  cvat: "${workdir}/cvat"               # Stage 3 import/export staging
+  manifest: "${workdir}/manifest.sqlite"
+
+# ---------------------------------------------------------------- Stage 1 ----
+extract:
+  # Image topics to pull. Multiple cameras supported; each becomes its own
+  # sampling stream keyed by topic.
+  topics:
+    - "/camera_front/image_raw"
+  sampling:
+    # interval : keep one frame every interval_sec
+    # phash    : keep a frame only if perceptually novel vs the last kept
+    #            (interval acts as a pre-filter floor before the phash gate)
+    # motion   : keep after robot moves > trans_m or rotates > rot_deg (needs odom)
+    strategy: "phash"
+    interval_sec: 1.0
+    phash_threshold: 8        # hamming distance (0-64); higher = more dedup
+    # motion strategy only:
+    odom_topic: "/odom"
+    trans_m: 0.25
+    rot_deg: 15.0
+  image_format: "jpg"         # jpg | png
+  jpeg_quality: 92
+  capture_camera_info: true   # store intrinsics per topic if present in the bag
+
+# ------------------------------------------------------- Stages 2 & 4 map ----
+# Canonical class table. category_id is the COCO id used end to end.
+classes:
+  - name: "grass"
+    id: 1
+    prompts: ["grass"]
+  - name: "mannequin"
+    id: 2
+    prompts: ["mannequin", "person"]   # try both, compare scores
+  - name: "pipe"
+    id: 3
+    prompts: ["horizontal metal pipe"] # generic "pipe" over-fires
+
+# Class priority for overlapping pixels when flattening instances -> semantic.
+# First wins. Anything not listed falls back to score order.
+priority: ["mannequin", "pipe", "grass"]
+
+# ---------------------------------------------------------------- Stage 2 ----
+autolabel:
+  backend: "sam3"             # sam3 (facebookresearch/sam3) | ultralytics
+  version: "sam3"             # sam3 | sam3.1  (gated HF repo facebook/sam3[.1])
+  checkpoint: null            # local .pt path to override HF download, else null
+  device: "cuda"
+  score_threshold: 0.40       # kept as pre-annotations; store per-instance score
+  max_instances: 100
+
+# ---------------------------------------------------------- Stage 3 (CVAT) ---
+# CVAT runs as its OWN docker-compose stack (github.com/cvat-ai/cvat). We talk
+# to it over HTTP via cvat-sdk. Put credentials in env vars, not here.
+cvat:
+  host: "http://localhost:8080"   # CVAT server URL
+  username_env: "CVAT_USER"       # env var holding the username
+  password_env: "CVAT_PASSWORD"   # env var holding the password
+  org: null                       # optional CVAT organization slug
+  project_id: null                # optional: attach created tasks to a project
+  conv_mask_to_poly: true         # import masks as editable polygons in CVAT
+  add_void_label: true            # add an "ignore/void" label for ambiguous px
+
+# ---------------------------------------------------------------- Stage 4 ----
+package:
+  layout: "coco"              # coco | webdataset
+  render_semantic_png: true   # also emit indexed-PNG semantic masks
+  split:
+    by: "bag"                 # bag | scene  (never random — leaks video dupes)
+    ratios: { train: 0.8, val: 0.1, test: 0.1 }
+    seed: 42

@@ -1,0 +1,11 @@
+work/
+*.bag
+*.db3
+*.mcap
+.git/
+.venv/
+__pycache__/
+*.egg-info/
+checkpoints/
+*.pt
+*.pth

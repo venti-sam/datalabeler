@@ -1,0 +1,21 @@
+# Pipeline working data (source bags & derived artifacts live outside git)
+work/
+*.bag
+*.db3
+*.mcap
+*.sqlite
+*.sqlite-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+
+# Model checkpoints
+*.pt
+*.pth
+checkpoints/

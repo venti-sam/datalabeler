@@ -1,0 +1,26 @@
+# Stage 2 (SAM 3 auto-labeling). Kept separate from the extraction env because
+# recent PyTorch/CUDA and the ROS-reading stack fight over dependencies.
+# facebookresearch/sam3 needs Python 3.12+, PyTorch 2.7+, CUDA 12.6+.
+# Requires the NVIDIA Container Toolkit on the host (--gpus all) and a HF token
+# with access granted on facebook/sam3 (pass HF_TOKEN at build/run time).
+FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY pyproject.toml ./
+COPY src ./src
+COPY scripts ./scripts
+# Surrounding deps for our package + Stage 2 runtime, then SAM 3 itself from git
+# (not published on PyPI).
+RUN pip install --no-cache-dir ".[sam3]" \
+    && pip install --no-cache-dir "git+https://github.com/facebookresearch/sam3.git"
+
+# Cache HF model downloads on a mounted volume; auth via `hf auth login` or
+# HF_TOKEN env. See docker-compose.yml.
+ENV HF_HOME=/app/checkpoints/hf
+
+ENTRYPOINT ["datalabeller"]
+CMD ["autolabel", "--help"]

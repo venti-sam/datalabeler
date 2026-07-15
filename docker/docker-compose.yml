@@ -1,0 +1,42 @@
+# Two decoupled services sharing the project dir (config, data/, work/).
+# The manifest + files on disk are the only handoff between them.
+#
+#   docker compose -f docker/docker-compose.yml build
+#   docker compose -f docker/docker-compose.yml run --rm extract extract
+#   docker compose -f docker/docker-compose.yml run --rm sam3   autolabel
+#   docker compose -f docker/docker-compose.yml run --rm extract cvat-export
+#   docker compose -f docker/docker-compose.yml run --rm extract package
+
+services:
+  extract:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.extract
+    volumes:
+      - ..:/app        # code, config/, data/ (bags), work/ (outputs)
+    working_dir: /app
+    # cvat-push/pull reach the CVAT server over HTTP. If CVAT runs via its own
+    # compose on this host, either use host networking (below) and host=
+    # http://localhost:8080, or join CVAT's external network instead.
+    environment:
+      - CVAT_USER
+      - CVAT_PASSWORD
+    # network_mode: host
+
+  sam3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.sam3
+    volumes:
+      - ..:/app
+      - ./checkpoints:/app/checkpoints   # cache HF model weights across runs
+    working_dir: /app
+    environment:
+      - HF_TOKEN                         # HF token with facebook/sam3 access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -38,8 +38,8 @@ Offline test suite (`pytest -q`) is green: 3 end-to-end tests, no GPU/weights.
       mentioned in the original design.
 - [ ] Active-learning loop: swap SAM 3 for a trained model as the pre-labeler in
       Stage 2 (backend abstraction already supports this).
-- [ ] Decide whether to rename the Python package `datalabeller` → `datalabeler`
-      to match the repo (currently only the folder/repo is `datalabeler`).
+- [x] Rename the Python package to `datalabeler` to match the repo (done;
+      package, console script, and imports are all `datalabeler`).
 
 ## TODO — nice to have
 

@@ -1,5 +1,5 @@
 [project]
-name = "datalabeller"
+name = "datalabeler"
 version = "0.1.0"
 description = "Decoupled rosbag -> SAM 3 -> CVAT -> COCO auto-labeling pipeline"
 requires-python = ">=3.10"
@@ -21,6 +21,9 @@ sam3 = [
     "torch>=2.7",
     "torchvision",
     "pillow",
+    # required at import time by the sam3 git package but missing from its
+    # dependency metadata
+    "einops",
 ]
 # Programmatic CVAT round-trip (Stage 3). Talks to a separately-running CVAT
 # server over HTTP; pure-python, safe to add to the extraction env.
@@ -32,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-datalabeller = "datalabeller.cli:cli"
+datalabeler = "datalabeler.cli:cli"
 
 [build-system]
 requires = ["setuptools>=68"]

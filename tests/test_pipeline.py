@@ -17,12 +17,12 @@ import numpy as np
 import pytest
 import yaml
 
-from datalabeller.config import load_config
-from datalabeller.coco import load_coco, rle_to_mask, seg_to_mask
-from datalabeller.manifest import AUTO, CORRECTED, EXTRACTED, Frame, Manifest
-from datalabeller.stages.autolabel import Sam3Backend, autolabel
-from datalabeller.stages.cvat import ingest_coco
-from datalabeller.stages.package import package
+from datalabeler.config import load_config
+from datalabeler.coco import load_coco, rle_to_mask, seg_to_mask
+from datalabeler.manifest import AUTO, CORRECTED, EXTRACTED, Frame, Manifest
+from datalabeler.stages.autolabel import Sam3Backend, autolabel
+from datalabeler.stages.cvat import ingest_coco
+from datalabeler.stages.package import package
 
 H, W = 40, 60
 

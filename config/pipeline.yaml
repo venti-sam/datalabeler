@@ -1,0 +1,69 @@
+# Working config for the htx_gemini_pipesmall.bag Stage 1 test.
+# Paths are absolute /app/... because everything runs inside the docker images.
+
+paths:
+  bags:
+    - "/app/data/bags/*.bag"
+  workdir: "/app/work"
+  images: "${workdir}/extracted_rosbag_images"   # Stage 1 output
+  annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
+  dataset: "${workdir}/packaged_dataset"          # Stage 4 packaged (image,label) pairs
+  cvat: "${workdir}/cvat_staging"                 # Stage 3 import/export staging
+  manifest: "${workdir}/manifest.sqlite"
+
+# ---------------------------------------------------------------- Stage 1 ----
+extract:
+  topics:
+    - "/camera/color/image_raw"
+  sampling:
+    strategy: "phash"
+    interval_sec: 1.0
+    phash_threshold: 8
+    odom_topic: "/odom"
+    trans_m: 0.25
+    rot_deg: 15.0
+  image_format: "jpg"
+  jpeg_quality: 92
+  capture_camera_info: true
+
+# ------------------------------------------------------- Stages 2 & 4 map ----
+classes:
+  - name: "grass"
+    id: 1
+    prompts: ["grass"]
+  - name: "mannequin"
+    id: 2
+    prompts: ["mannequin", "person"]
+  - name: "pipe"
+    id: 3
+    prompts: ["horizontal metal pipe"]
+
+priority: ["mannequin", "pipe", "grass"]
+
+# ---------------------------------------------------------------- Stage 2 ----
+autolabel:
+  backend: "sam3"
+  version: "sam3"
+  checkpoint: null
+  device: "cuda"
+  score_threshold: 0.40
+  max_instances: 100
+
+# ---------------------------------------------------------- Stage 3 (CVAT) ---
+cvat:
+  host: "http://localhost:8080"
+  username_env: "CVAT_USER"
+  password_env: "CVAT_PASSWORD"
+  org: null
+  project_id: null
+  conv_mask_to_poly: true
+  add_void_label: true
+
+# ---------------------------------------------------------------- Stage 4 ----
+package:
+  layout: "coco"
+  render_semantic_png: true
+  split:
+    by: "bag"
+    ratios: { train: 0.8, val: 0.1, test: 0.1 }
+    seed: 42

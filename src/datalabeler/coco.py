@@ -19,7 +19,7 @@ from .config import ClassDef
 
 def empty_coco(classes: Iterable[ClassDef]) -> dict[str, Any]:
     return {
-        "info": {"description": "datalabeller canonical COCO"},
+        "info": {"description": "datalabeler canonical COCO"},
         "images": [],
         "annotations": [],
         "categories": [{"id": c.id, "name": c.name} for c in classes],

@@ -206,7 +206,7 @@ def cvat_push(cfg: Config, bag: Optional[str] = None,
                 print(f"[cvat] task {name} already pushed "
                       f"(id={reg[name]['task_id']}); skipping")
                 continue
-            spec = {"name": f"datalabeller_{name}", "labels": _label_spec(cfg)}
+            spec = {"name": f"datalabeler_{name}", "labels": _label_spec(cfg)}
             if cfg.cvat.get("project_id"):
                 spec["project_id"] = cfg.cvat["project_id"]
             images = [fr["image_path"] for fr in group]

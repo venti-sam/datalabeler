@@ -7,10 +7,10 @@ paths:
   bags:
     - "data/bags/*.bag"
   workdir: "work"
-  images: "${workdir}/images"           # Stage 1 output
-  annotations: "${workdir}/annotations" # canonical per-frame COCO (stages 2-3)
-  dataset: "${workdir}/dataset"         # Stage 4 packaged (image,label) pairs
-  cvat: "${workdir}/cvat"               # Stage 3 import/export staging
+  images: "${workdir}/extracted_rosbag_images"   # Stage 1 output
+  annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
+  dataset: "${workdir}/packaged_dataset"          # Stage 4 packaged (image,label) pairs
+  cvat: "${workdir}/cvat_staging"                 # Stage 3 import/export staging
   manifest: "${workdir}/manifest.sqlite"
 
 # ---------------------------------------------------------------- Stage 1 ----

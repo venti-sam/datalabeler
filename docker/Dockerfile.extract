@@ -15,5 +15,5 @@ COPY tests ./tests
 RUN pip install --no-cache-dir ".[cvat,dev]"
 
 # Bags and outputs are bind-mounted at runtime (see docker-compose.yml).
-ENTRYPOINT ["datalabeller"]
+ENTRYPOINT ["datalabeler"]
 CMD ["--help"]

@@ -1,4 +1,4 @@
-"""datalabeller CLI - one subcommand per stage, all sharing config + manifest."""
+"""datalabeler CLI - one subcommand per stage, all sharing config + manifest."""
 from __future__ import annotations
 
 import click

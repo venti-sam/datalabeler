@@ -43,13 +43,22 @@ def _write_image(bgr, out_dir: Path, fid: str, cfg: Config) -> str:
     return str(path)
 
 
+def _ci_field(msg, name: str):
+    # CameraInfo intrinsics are lowercase (k/d/p) in ROS 2 but uppercase
+    # (K/D/P) in ROS 1; rosbags preserves the source casing. Accept both.
+    val = getattr(msg, name.lower(), None)
+    if val is None:
+        val = getattr(msg, name.upper(), None)
+    return [] if val is None else list(val)
+
+
 def _capture_camera_info(mani: Manifest, topic: str, msg) -> None:
     if mani.has_camera_info(topic):
         return
     mani.put_camera_info(
         topic=topic, width=int(msg.width), height=int(msg.height),
         distortion_model=getattr(msg, "distortion_model", ""),
-        K=list(msg.k), D=list(msg.d), P=list(msg.p))
+        K=_ci_field(msg, "k"), D=_ci_field(msg, "d"), P=_ci_field(msg, "p"))
 
 
 def extract(cfg: Config) -> dict[str, int]:

@@ -21,8 +21,8 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from datalabeller.config import load_config  # noqa: E402
-from datalabeller.stages.autolabel import Sam3RepoBackend  # noqa: E402
+from datalabeler.config import load_config  # noqa: E402
+from datalabeler.stages.autolabel import Sam3RepoBackend  # noqa: E402
 
 _COLORS = [(0, 200, 0), (0, 0, 220), (220, 120, 0), (200, 0, 200), (0, 200, 200)]
 

@@ -3,7 +3,9 @@
 # facebookresearch/sam3 needs Python 3.12+, PyTorch 2.7+, CUDA 12.6+.
 # Requires the NVIDIA Container Toolkit on the host (--gpus all) and a HF token
 # with access granted on facebook/sam3 (pass HF_TOKEN at build/run time).
-FROM pytorch/pytorch:2.7.0-cuda12.6-cudnn9-runtime
+# cuda12.8 build required for Blackwell GPUs (sm_120, e.g. RTX 5080); the
+# cu126 wheels only ship kernels up to sm_90 and fail at the first CUDA op.
+FROM pytorch/pytorch:2.7.0-cuda12.8-cudnn9-runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 libglib2.0-0 git \
@@ -22,5 +24,5 @@ RUN pip install --no-cache-dir ".[sam3]" \
 # HF_TOKEN env. See docker-compose.yml.
 ENV HF_HOME=/app/checkpoints/hf
 
-ENTRYPOINT ["datalabeller"]
+ENTRYPOINT ["datalabeler"]
 CMD ["autolabel", "--help"]

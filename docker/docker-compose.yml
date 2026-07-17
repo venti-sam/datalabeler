@@ -7,13 +7,43 @@
 #   docker compose -f docker/docker-compose.yml run --rm extract cvat-export
 #   docker compose -f docker/docker-compose.yml run --rm extract package
 
+# Pinned so the project isn't named after this directory ("docker"), which both
+# collides with any other repo whose compose lives in a docker/ dir and names the
+# built images docker-<service> instead of datalabeler-<service>.
+name: datalabeler
+
+# Both services run as the invoking host user, not root, so everything they
+# write into the bind-mounted project dir (work/, checkpoints/) stays yours to
+# read and delete without sudo. The docker/*.sh helpers export DL_UID/DL_GID;
+# the 1000 defaults cover the usual single-user Linux box when you invoke
+# `docker compose` by hand. HOME is redirected because this uid has no passwd
+# entry in the image, so its default home (/) is not writable -- caches that
+# land in ~ (torch, triton, hf) would fail. See DEV.md.
+#
+# The read-only /etc/passwd + /etc/group mounts are what stop the shell greeting
+# you as `I have no name!`: that uid exists on the host but not in the image, and
+# without a name behind it `whoami`, `groups` and anything else doing a uid->name
+# lookup fail. Read-only, and no secrets live in either file (passwords are in
+# /etc/shadow, which is not mounted).
+x-runas: &runas
+  user: "${DL_UID:-1000}:${DL_GID:-1000}"
+
 services:
   extract:
+    <<: *runas
     build:
       context: ..
       dockerfile: docker/Dockerfile.extract
     volumes:
       - ..:/app        # code, config/, data/ (bags), work/ (outputs)
+      # Bags to read. Defaults to the repo's own data/bags; point DL_BAGS_DIR
+      # (in docker/.env) at a directory elsewhere to label bags without copying
+      # them in. A *symlink* under data/bags cannot work -- it resolves to a host
+      # path that isn't mounted, so it dangles inside the container; this mount,
+      # a hard link, or a copy are the options. Read-only: Stage 1 never writes.
+      - ${DL_BAGS_DIR:-../data/bags}:/app/data/bags:ro
+      - /etc/passwd:/etc/passwd:ro   # so the container uid has a name
+      - /etc/group:/etc/group:ro
     working_dir: /app
     # cvat-push/pull reach the CVAT server over HTTP. If CVAT runs via its own
     # compose on this host, either use host networking (below) and host=
@@ -21,18 +51,23 @@ services:
     environment:
       - CVAT_USER
       - CVAT_PASSWORD
+      - HOME=/tmp
     # network_mode: host
 
   sam3:
+    <<: *runas
     build:
       context: ..
       dockerfile: docker/Dockerfile.sam3
     volumes:
       - ..:/app
       - ./checkpoints:/app/checkpoints   # cache HF model weights across runs
+      - /etc/passwd:/etc/passwd:ro       # so the container uid has a name
+      - /etc/group:/etc/group:ro
     working_dir: /app
     environment:
       - HF_TOKEN                         # HF token with facebook/sam3 access
+      - HOME=/tmp
     deploy:
       resources:
         reservations:

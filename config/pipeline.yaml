@@ -9,6 +9,7 @@ paths:
   annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
   dataset: "${workdir}/packaged_dataset"          # Stage 4 packaged (image,label) pairs
   cvat: "${workdir}/cvat_staging"                 # Stage 3 import/export staging
+  preview: "${workdir}/preview_overlays"          # `preview` verification overlays
   manifest: "${workdir}/manifest.sqlite"
 
 # ---------------------------------------------------------------- Stage 1 ----
@@ -36,7 +37,12 @@ classes:
     prompts: ["mannequin", "person"]
   - name: "pipe"
     id: 3
-    prompts: ["horizontal metal pipe"]
+    # Each prompt is one *concept*, run separately. A conjunction is two, and
+    # matches nothing: "horizontal and vertical metal pipe" scored 0 masks here
+    # where plain "metal pipe" gets 8 -- it covers both orientations precisely by
+    # naming neither. Span distinct concepts with more list entries, not "A and B"
+    # (but note nothing dedupes across prompts: overlapping hits become doubles).
+    prompts: ["metal pipe"]
 
 priority: ["mannequin", "pipe", "grass"]
 

@@ -11,6 +11,7 @@ paths:
   annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
   dataset: "${workdir}/packaged_dataset"          # Stage 4 packaged (image,label) pairs
   cvat: "${workdir}/cvat_staging"                 # Stage 3 import/export staging
+  preview: "${workdir}/preview_overlays"          # `preview` verification overlays
   manifest: "${workdir}/manifest.sqlite"
 
 # ---------------------------------------------------------------- Stage 1 ----

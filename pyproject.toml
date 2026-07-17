@@ -24,6 +24,11 @@ sam3 = [
     # required at import time by the sam3 git package but missing from its
     # dependency metadata
     "einops",
+    # sam3 itself pins numpy<2. Mirror that here, and hold opencv below 5.0
+    # (which requires numpy>=2) so pip resolves one coherent set instead of
+    # leaving an opencv built against the numpy 2 ABI on top of numpy 1.26.
+    "numpy<2",
+    "opencv-python-headless<5",
 ]
 # Programmatic CVAT round-trip (Stage 3). Talks to a separately-running CVAT
 # server over HTTP; pure-python, safe to add to the extraction env.

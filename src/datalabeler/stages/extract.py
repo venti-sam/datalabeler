@@ -69,6 +69,7 @@ def extract(cfg: Config) -> dict[str, int]:
     phash_thr = int(samp.get("phash_threshold", 8))
     capture_ci = bool(cfg.extract.get("capture_camera_info", True))
     images_dir = cfg.path("images")
+    img_fmt = cfg.extract.get("image_format", "jpg").lower()
 
     if strategy == "motion":
         # Odometry-gated sampling needs time-synced odom lookup; not yet wired.
@@ -76,7 +77,7 @@ def extract(cfg: Config) -> dict[str, int]:
         print("[extract] motion sampling not implemented; using interval floor")
         strategy = "interval"
 
-    stats = {"kept": 0, "skipped_existing": 0, "seen": 0}
+    stats = {"kept": 0, "skipped_existing": 0, "repaired_missing": 0, "seen": 0}
     bags = cfg.bag_files
     if not bags:
         raise SystemExit("no bags matched paths.bags")
@@ -120,7 +121,18 @@ def extract(cfg: Config) -> dict[str, int]:
 
                     fid = frame_id(bag, topic, stamp)
                     if mani.has(fid):
-                        stats["skipped_existing"] += 1
+                        # A manifest row is not proof the pixels survived. If the
+                        # image is gone (workdir cleaned by hand, moved, half-copied)
+                        # rewrite it instead of skipping forever -- skipping on the
+                        # row alone wedges the pipeline: every later stage then reads
+                        # a file that isn't there and there is no way back short of
+                        # deleting the manifest. Status is left alone so a repair
+                        # can't quietly downgrade `corrected` work to `extracted`.
+                        if (images_dir / f"{fid}.{img_fmt}").exists():
+                            stats["skipped_existing"] += 1
+                        else:
+                            _write_image(bgr, images_dir, fid, cfg)
+                            stats["repaired_missing"] += 1
                         continue
 
                     path = _write_image(bgr, images_dir, fid, cfg)

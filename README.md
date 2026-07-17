@@ -12,6 +12,19 @@ manifest, so each can run in its own environment and be re-run independently.
                          canonical format: COCO (RLE masks)
 ```
 
+## Status
+
+| Stage | Verified on real data? |
+|-------|------------------------|
+| 1 — rosbag extract | ✅ **ROS 1** `.bag` — ⚠️ **ROS 2 (`.mcap`/`.db3`) not yet checked** |
+| 2 — SAM 3 autolabel | ✅ end to end on the real gated weights (RTX 4090) |
+| 3 — CVAT round-trip | ⚠️ **not yet checked against a live CVAT server** |
+| 4 — package + splits | ✅ unit-tested (not yet run on a corrected dataset) |
+
+The two gaps are ROS 2 extraction and the CVAT round-trip: both are written and
+unit-tested, neither has met a real bag/server. See [DEV.md](DEV.md) for what
+specifically remains unconfirmed in each.
+
 ## Design backbone
 
 - **One config** (`config/pipeline.yaml`) spanning all stages — topics,
@@ -45,9 +58,19 @@ docker compose -f docker/docker-compose.yml build
 the RTX 5080 / sm_120; the 12.6 wheels only ship kernels up to sm_90.)
 
 SAM 3 weights are **gated**: request access on
-[huggingface.co/facebook/sam3](https://huggingface.co/facebook/sam3), then pass a
-token — `HF_TOKEN=hf_xxx docker compose ... run --rm sam3 autolabel`. Weights
-cache to `docker/checkpoints/` across runs.
+[huggingface.co/facebook/sam3](https://huggingface.co/facebook/sam3), mint a token,
+and put it in `docker/.env` (start from `docker/.env.example`):
+
+```bash
+cp docker/.env.example docker/.env    # then set HF_TOKEN=hf_...
+```
+
+Compose reads that file automatically — it sits next to the compose file — so the
+token reaches Stage 2 whether you use `./join.sh sam3` or a hand-run
+`docker compose ... run --rm sam3 autolabel`, with nothing to export each session.
+`.env` is gitignored and kept chmod 600; **it is the only place a secret belongs** —
+not the compose file, not the config YAML. Weights cache to `docker/checkpoints/`
+across runs, so the token is only needed for the first download of a version.
 
 ### Terminal workflow (`docker/*.sh`)
 
@@ -74,11 +97,14 @@ for stage 2. Everything below runs **inside** that container:
 
 ```bash
 cp config/pipeline.example.yaml config/pipeline.yaml   # then edit topics/classes/paths
-# put bags under data/bags/ (or point paths.bags elsewhere)
+# put bags under data/bags/ — or leave them where they are and set DL_BAGS_DIR
+# in docker/.env to that directory (a symlink into data/bags will NOT work: it
+# resolves to a host path the container hasn't mounted)
 
 # --- inside the extract container (./join.sh extract) ---
 datalabeler extract                              # Stage 1 — sampled frames
 datalabeler status                               # counts by label status, any time
+datalabeler preview                              # overlays to eyeball labels, any time
 
 # Stage 3 — human correction in CVAT (automated round-trip, see below)
 CVAT_USER=admin CVAT_PASSWORD=... datalabeler cvat-push
@@ -89,6 +115,21 @@ datalabeler package                              # Stage 4 — (image,label) pai
 
 # --- inside the sam3 container (./join.sh sam3) ---
 datalabeler autolabel                            # Stage 2 — SAM 3 pre-annotations (GPU)
+```
+
+### Eyeballing the labels (`datalabeler preview`)
+
+Writes `work/preview_overlays/<frame_id>.png` — each frame with its masks burned
+on, coloured by class with a legend of what was found. It renders from the
+canonical per-frame COCO rather than from model output, so it needs no GPU and
+runs in the **extract** container, and what you see is what the next stage
+actually consumes (RLE decode included). Overlapping instances are flattened by
+the same `priority` the packaged masks use.
+
+```bash
+datalabeler preview                       # every frame in the manifest
+datalabeler preview --status auto         # just SAM 3's output (or: corrected)
+datalabeler preview --limit 20 --alpha 0.6
 ```
 
 Prefer one-shot runs without a persistent shell? Each command also works as
@@ -175,8 +216,8 @@ pytest -q                          # offline: no GPU, no SAM 3 weights
 `tests/test_pipeline.py` injects a fake segmentation backend and a simulated
 CVAT export to exercise Stage 2 → 3 → 4 end to end (COCO RLE round-trip,
 name-based category remap, void drop, polygon→RLE, semantic-priority flatten,
-splits). The **real** SAM 3 check runs inside the GPU container (`./join.sh sam3`,
-with `HF_TOKEN` exported so the gated weights can download):
+splits). The **real** SAM 3 check runs inside the GPU container (`./join.sh sam3`;
+the gated weights download using the `HF_TOKEN` from `docker/.env`):
 
 ```bash
 python scripts/smoke_sam3.py --image data/sample.jpg

@@ -12,7 +12,9 @@ COPY src ./src
 COPY scripts ./scripts
 COPY tests ./tests
 # [cvat] adds cvat-sdk for the automated Stage 3 round-trip; [dev] adds pytest.
-RUN pip install --no-cache-dir ".[cvat,dev]"
+# Editable: compose mounts the repo over /app, so a non-editable install would
+# pin the CLI to the copy baked in at build time and silently ignore edits.
+RUN pip install --no-cache-dir -e ".[cvat,dev]"
 
 # Bags and outputs are bind-mounted at runtime (see docker-compose.yml).
 ENTRYPOINT ["datalabeler"]

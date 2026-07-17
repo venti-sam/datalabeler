@@ -17,6 +17,8 @@ if [ ! -f "docker-compose.yml" ]; then
     exit 1
 fi
 
+./_env.sh
+
 echo "=================================="
 echo "     Start Dev Container"
 echo "=================================="

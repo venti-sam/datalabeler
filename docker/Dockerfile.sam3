@@ -1,6 +1,8 @@
 # Stage 2 (SAM 3 auto-labeling). Kept separate from the extraction env because
 # recent PyTorch/CUDA and the ROS-reading stack fight over dependencies.
-# facebookresearch/sam3 needs Python 3.12+, PyTorch 2.7+, CUDA 12.6+.
+# facebookresearch/sam3 needs PyTorch 2.7+ and CUDA 12.6+. Its README says
+# Python 3.12+, but its pyproject only requires >=3.8 and it runs fine on the
+# 3.11 this base image ships — verified end to end, so don't chase a 3.12 base.
 # Requires the NVIDIA Container Toolkit on the host (--gpus all) and a HF token
 # with access granted on facebook/sam3 (pass HF_TOKEN at build/run time).
 # cuda12.8 build required for Blackwell GPUs (sm_120, e.g. RTX 5080); the
@@ -17,7 +19,9 @@ COPY src ./src
 COPY scripts ./scripts
 # Surrounding deps for our package + Stage 2 runtime, then SAM 3 itself from git
 # (not published on PyPI).
-RUN pip install --no-cache-dir ".[sam3]" \
+# Editable: compose mounts the repo over /app, so a non-editable install would
+# pin the CLI to the copy baked in at build time and silently ignore edits.
+RUN pip install --no-cache-dir -e ".[sam3]" \
     && pip install --no-cache-dir "git+https://github.com/facebookresearch/sam3.git"
 
 # Cache HF model downloads on a mounted volume; auth via `hf auth login` or

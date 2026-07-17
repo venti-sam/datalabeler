@@ -57,7 +57,8 @@ def main() -> int:
         prompts = ["person"]
 
     print(f"[smoke] building SAM 3 ({version}, device={device}) ...")
-    backend = Sam3RepoBackend(checkpoint, device, version=version)
+    backend = Sam3RepoBackend(checkpoint, device, version=version,
+                              score_threshold=args.min_score)
     print("[smoke] model ready")
 
     overlay = bgr.copy()

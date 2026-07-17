@@ -61,9 +61,15 @@ class Sam3RepoBackend(Sam3Backend):
       * a local file path in `checkpoint` -> load it directly
       * else `version` ("sam3" | "sam3.1") -> download from the gated HF repo
         (requires `hf auth login` with access granted on facebook/sam3[.1]).
+
+    `score_threshold` is handed to the processor, not just applied afterwards:
+    Sam3Processor drops detections below its own `confidence_threshold` (0.5 by
+    default) inside `set_text_prompt`, so a config threshold below that would
+    otherwise be silently unreachable.
     """
 
-    def __init__(self, checkpoint: str | None, device: str, version: str = "sam3"):
+    def __init__(self, checkpoint: str | None, device: str, version: str = "sam3",
+                 score_threshold: float = 0.5):
         from sam3.model_builder import build_sam3_image_model
         from sam3.model.sam3_image_processor import Sam3Processor
 
@@ -78,20 +84,31 @@ class Sam3RepoBackend(Sam3Backend):
             checkpoint_path=local,
             load_from_HF=local is None,
         )
-        self.processor = Sam3Processor(model)
+        self.processor = Sam3Processor(model, device=device,
+                                       confidence_threshold=score_threshold)
         self.device = device
+        # "cuda:0" -> "cuda" for the autocast device_type; autocast stays off on CPU.
+        self.autocast_device = str(device).split(":")[0]
 
     def segment(self, bgr, prompt):
+        import torch
         from PIL import Image
 
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])  # BGR -> RGB for PIL
-        state = self.processor.set_image(Image.fromarray(rgb))
-        out = self.processor.set_text_prompt(prompt=prompt, state=state)
+        # The image path has no autocast of its own (unlike sam3's video
+        # predictor, which decorates its forward): the checkpoint's weights are
+        # bfloat16, so running without it dies on a dtype mismatch in vitdet.
+        with torch.autocast(device_type=self.autocast_device,
+                            dtype=torch.bfloat16,
+                            enabled=self.autocast_device == "cuda"):
+            state = self.processor.set_image(Image.fromarray(rgb))
+            out = self.processor.set_text_prompt(prompt=prompt, state=state)
         masks, scores = out.get("masks"), out.get("scores")
         if masks is None or masks.shape[0] == 0:
             return []
         masks = masks.squeeze(1).detach().cpu().numpy().astype(np.uint8)  # (N,H,W)
-        scores = scores.detach().cpu().numpy().reshape(-1)
+        # .float() first: scores come back bfloat16, which numpy cannot convert.
+        scores = scores.detach().float().cpu().numpy().reshape(-1)
         return [(masks[i], float(scores[i])) for i in range(masks.shape[0])]
 
 
@@ -102,7 +119,8 @@ def _make_backend(cfg: Config) -> Sam3Backend:
         return UltralyticsBackend(a["checkpoint"], a.get("device", "cuda"))
     if backend == "sam3":
         return Sam3RepoBackend(a.get("checkpoint"), a.get("device", "cuda"),
-                               version=a.get("version", "sam3"))
+                               version=a.get("version", "sam3"),
+                               score_threshold=float(a.get("score_threshold", 0.4)))
     raise ValueError(f"unknown autolabel backend: {backend}")
 
 

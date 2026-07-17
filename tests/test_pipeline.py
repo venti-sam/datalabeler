@@ -23,6 +23,7 @@ from datalabeler.manifest import AUTO, CORRECTED, EXTRACTED, Frame, Manifest
 from datalabeler.stages.autolabel import Sam3Backend, autolabel
 from datalabeler.stages.cvat import ingest_coco
 from datalabeler.stages.package import package
+from datalabeler.stages.preview import preview
 
 H, W = 40, 60
 
@@ -100,6 +101,34 @@ def test_stage2_autolabel_writes_valid_coco(project):
 
     with Manifest(cfg.path("manifest")) as mani:
         assert set(mani.counts_by_status()) == {AUTO}
+
+
+def test_preview_renders_overlays_by_class_priority(project):
+    cfg, frame_ids = project
+    autolabel(cfg, backend=FakeBackend())
+
+    stats = preview(cfg, alpha=0.5)
+    assert stats == {"rendered": 2, "no_annotations": 0,
+                     "missing_image": 0, "not_labeled_yet": 0}
+
+    # the fixture config has no paths.preview, so this also covers the fallback
+    out = cfg.path("workdir") / "preview_overlays" / f"{frame_ids[0]}.png"
+    assert out.exists()
+    img = cv2.imread(str(out))
+    assert img.shape == (H, W, 3)
+
+    # base frame is uniform 127 grey and alpha is 0.5, so an overlaid pixel is
+    # exactly halfway between grey and its class colour.
+    def blended(class_id: int) -> np.ndarray:
+        from datalabeler.stages.preview import _palette
+        return (0.5 * np.array(_palette(cfg)[class_id]) + 0.5 * 127).astype(np.uint8)
+
+    # priority mannequin(2) > pipe(3) > grass(1), same as the packaged masks.
+    # All three pixels are region interiors: boundary pixels carry the contour
+    # outline, which is drawn in pure colour rather than blended.
+    assert np.array_equal(img[20, 30], blended(3))   # pipe stripe wins over grass
+    assert np.array_equal(img[4, 4], blended(2))     # mannequin corner wins over both
+    assert np.array_equal(img[35, 35], blended(1))   # grass elsewhere
 
 
 def _fake_cvat_export(frame_ids):

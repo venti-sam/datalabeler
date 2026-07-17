@@ -34,6 +34,12 @@ def autolabel(config_path: str, reannotate: bool) -> None:
     cfg = load_config(config_path)
     stats = run(cfg, reannotate=reannotate)
     click.echo(f"autolabel: {stats}")
+    if not reannotate and stats["labeled"] == 0 and stats["skipped"] == 0:
+        # "labeled: 0" on its own reads like a failure. It usually means every
+        # frame is past `extracted` already, which is the resume guard working.
+        click.echo("nothing to do: autolabel only picks up status=extracted "
+                   "frames. See `datalabeler status`; use --reannotate to redo "
+                   "frames that are already labeled.")
 
 
 @cli.command("cvat-export")
@@ -96,6 +102,21 @@ def package(config_path: str, use_status: str) -> None:
     cfg = load_config(config_path)
     stats = run(cfg, use_status=use_status)
     click.echo(f"package: {stats}")
+
+
+@cli.command()
+@_config_opt
+@click.option("--status", "status_", default=None,
+              type=click.Choice(["extracted", "auto", "corrected"]),
+              help="limit to frames at this label status (default: all)")
+@click.option("--alpha", default=0.5, show_default=True, help="mask blend strength")
+@click.option("--limit", type=int, default=None, help="render at most N frames")
+def preview(config_path: str, status_: str | None, alpha: float, limit: int | None) -> None:
+    """Render semantic overlays from canonical COCO for eyeballing labels."""
+    from .stages.preview import preview as run
+    cfg = load_config(config_path)
+    stats = run(cfg, status=status_, alpha=alpha, limit=limit)
+    click.echo(f"preview: {stats}")
 
 
 @cli.command()

@@ -16,14 +16,15 @@ manifest, so each can run in its own environment and be re-run independently.
 
 | Stage | Verified on real data? |
 |-------|------------------------|
-| 1 — rosbag extract | ✅ **ROS 1** `.bag` — ⚠️ **ROS 2 (`.mcap`/`.db3`) not yet checked** |
+| 1 — rosbag extract | ✅ **ROS 1** `.bag` **and ROS 2** `.db3` — ⚠️ ROS 2 `.mcap` / `CompressedImage` not yet checked |
 | 2 — SAM 3 autolabel | ✅ end to end on the real gated weights (RTX 4090) |
-| 3 — CVAT round-trip | ⚠️ **not yet checked against a live CVAT server** |
+| 3 — CVAT round-trip | ✅ full push→correct→pull verified on a live server (CVAT v2.70.0, 20 frames) |
 | 4 — package + splits | ✅ unit-tested (not yet run on a corrected dataset) |
 
-The two gaps are ROS 2 extraction and the CVAT round-trip: both are written and
-unit-tested, neither has met a real bag/server. See [DEV.md](DEV.md) for what
-specifically remains unconfirmed in each.
+Stages 1–3 have now run end to end on real data. Remaining gaps: ROS 2
+`.mcap`/`CompressedImage` extraction (only `.db3` + raw `Image` checked), and
+Stage 4 packaging on a real corrected dataset (now unblocked — 20 frames are
+`corrected`). See [DEV.md](DEV.md) for specifics.
 
 ## Design backbone
 
@@ -91,31 +92,85 @@ would otherwise exit); `join.sh` auto-starts it if it isn't running.
 
 ## Run
 
-First set up the config, then get a shell inside the right image with the
-helper scripts above — `./join.sh extract` for stages 1/3/4, `./join.sh sam3`
-for stage 2. Everything below runs **inside** that container:
+Each stage runs **inside** one of the two containers. The container hop is
+**`extract` (Stage 1) → `sam3` (Stage 2) → `extract` (Stages 3 & 4)**, and
+`work/manifest.sqlite` carries state across every hop — the two images never talk
+directly, so you can quit one container and pick up the next stage in the other.
+Statuses advance `extracted → auto → corrected` as you go, and every stage is
+resumable: re-running skips frames already recorded.
+
+**Setup (once, on the host):**
 
 ```bash
-cp config/pipeline.example.yaml config/pipeline.yaml   # then edit topics/classes/paths
-# put bags under data/bags/ — or leave them where they are and set DL_BAGS_DIR
-# in docker/.env to that directory (a symlink into data/bags will NOT work: it
-# resolves to a host path the container hasn't mounted)
-
-# --- inside the extract container (./join.sh extract) ---
-datalabeler extract                              # Stage 1 — sampled frames
-datalabeler status                               # counts by label status, any time
-datalabeler preview                              # overlays to eyeball labels, any time
-
-# Stage 3 — human correction in CVAT (automated round-trip, see below)
-CVAT_USER=admin CVAT_PASSWORD=... datalabeler cvat-push
-#   ... humans correct in the CVAT UI ...
-CVAT_USER=admin CVAT_PASSWORD=... datalabeler cvat-pull --annotator alice
-
-datalabeler package                              # Stage 4 — (image,label) pairs + splits
-
-# --- inside the sam3 container (./join.sh sam3) ---
-datalabeler autolabel                            # Stage 2 — SAM 3 pre-annotations (GPU)
+cp config/pipeline.example.yaml config/pipeline.yaml   # edit topics / classes / prompts / paths
+cp docker/.env.example docker/.env                     # set HF_TOKEN (+ CVAT_USER/PASSWORD, DL_BAGS_DIR if needed)
+# put bags under data/bags/ — or set DL_BAGS_DIR in docker/.env to a directory
+# elsewhere (a symlink into data/bags will NOT work: it resolves to a host path
+# the container hasn't mounted)
+cd docker && ./build.sh                                # no arg = build both images
 ```
+
+**Stage 1 — extract frames** (`extract` container):
+
+```bash
+./join.sh extract
+datalabeler extract      # bags → sampled frames in work/extracted_rosbag_images/, rows @ status=extracted
+datalabeler status       # sanity-check the counts, any time
+```
+
+**Stage 2 — SAM 3 auto-label** (`sam3` container, GPU):
+
+```bash
+exit; ./join.sh sam3
+datalabeler autolabel    # per-class prompts → per-frame COCO in work/coco_annotations/, rows → status=auto
+```
+
+First run downloads the gated weights (via `HF_TOKEN`) into `docker/checkpoints/`;
+later runs reuse the cache. `autolabel` only touches `status=extracted` frames, so
+a re-run reports `labeled: 0` — that's correct, not a failure; use `--reannotate`
+to redo them.
+
+**Eyeball the labels** (`extract` container — no GPU needed):
+
+```bash
+exit; ./join.sh extract
+datalabeler preview --status auto    # overlays → work/preview_overlays/ (see below)
+```
+
+**Stage 3 — human correction in CVAT** (`extract` container):
+
+One-time — start the CVAT server (its own stack: `docker/cvat.sh` clones + runs
+cvat-ai/cvat; first `up` pulls several GB) and create the login you put in
+`docker/.env` as `CVAT_USER`/`CVAT_PASSWORD`:
+
+```bash
+cd docker && ./cvat.sh up && ./cvat.sh superuser    # UI at http://localhost:8080
+```
+
+Then, in the `extract` container:
+
+```bash
+datalabeler cvat-push                     # status=auto frames → CVAT tasks + images + SAM masks as pre-annotations
+
+# Now correct in the browser: open http://localhost:8080/tasks/1 (login admin/admin),
+#   open the job, and go frame by frame fixing SAM 3's masks:
+#     - drag polygon points to tighten boundaries
+#     - delete false masks
+#     - draw any object SAM 3 missed
+#     - paint ambiguous pixels with the "void" label (dropped to background on ingest)
+#   Save as you go (Ctrl+S).
+
+datalabeler cvat-pull --annotator alice   # corrected COCO back → status=corrected
+```
+
+**Stage 4 — package** (`extract` container):
+
+```bash
+datalabeler package                       # status=corrected frames → work/packaged_dataset/ (train/val/test by bag)
+```
+
+For a dry run before any correction, `datalabeler package --use-status auto`
+packages the raw SAM 3 output instead.
 
 ### Eyeballing the labels (`datalabeler preview`)
 
@@ -138,6 +193,30 @@ Prefer one-shot runs without a persistent shell? Each command also works as
 then `datalabeler <cmd>` (add `.[cvat]` for Stage 3, `.[sam3]` + the sam3 git
 package for Stage 2 on a CUDA host).
 
+## Shutting down
+
+This runs a lot of containers — our two dev shells plus CVAT's ~17-container
+stack. To stop everything, from `docker/`:
+
+```bash
+./stop.sh extract        # stop + remove the extract dev container
+./stop.sh sam3           # stop + remove the sam3 dev container
+./cvat.sh down           # stop CVAT's whole stack
+```
+
+Nothing above deletes data. `./cvat.sh down` keeps CVAT's projects/tasks/
+annotations in Docker volumes (so `./cvat.sh up` brings them back), and your
+pipeline outputs stay in `work/` regardless.
+
+**Reclaiming disk (optional).** The images are large (the sam3 CUDA image + CVAT's
+many images). See what's using space with `docker system df`. To remove CVAT
+entirely, including its annotation volumes:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/../cvat"   # or wherever CVAT_DIR points
+docker compose down --rmi all -v                # -v ALSO deletes annotations — export first
+```
+
 ## Output dataset (`work/packaged_dataset/`)
 
 ```
@@ -153,58 +232,6 @@ packaged_dataset/
 Splits are assigned **by bag** (`package.split.by`), never randomly — random
 splits leak near-duplicate video frames across train/val/test and inflate
 metrics.
-
-## Stage 3 — CVAT integration
-
-CVAT ships as its **own** multi-container docker-compose stack
-([github.com/cvat-ai/cvat](https://github.com/cvat-ai/cvat)) — server, UI, db,
-redis, workers. We do **not** merge it into our compose; we run it independently
-and talk to it over HTTP with `cvat-sdk`. Bring it up once:
-
-```bash
-git clone https://github.com/cvat-ai/cvat && cd cvat
-docker compose up -d                 # serves the UI on http://localhost:8080
-docker exec -it cvat_server bash -ic \
-  'python3 ~/manage.py createsuperuser'   # make the account you'll put in CVAT_USER/PASSWORD
-```
-
-Then two ways to run the correction loop — both feed the **same** ingest, so
-canonical annotations stay uniform (RLE, our category ids):
-
-**Automated (recommended, `cvat-sdk`)**
-
-| Command | What it does |
-|---------|--------------|
-| `datalabeler cvat-push` | Groups `status=auto` frames into tasks (by bag, or `--batch N`), creates each CVAT task, uploads the images, and uploads the SAM 3 masks as pre-annotations (`import_annotations`, COCO 1.0). Records task ids in `work/cvat_staging/tasks.json`. |
-| `datalabeler cvat-pull` | For each recorded task, `export_dataset` (COCO 1.0), then ingest → per-frame canonical COCO + `status=corrected` in the manifest. |
-
-Config lives under `cvat:` in the pipeline YAML (host, `project_id`, whether to
-import masks as editable polygons). **Credentials come from env vars**
-(`CVAT_USER`/`CVAT_PASSWORD`), never the config file.
-
-**Manual (no server scripting)** — `cvat-export` writes `work/cvat_staging/<name>/`
-(images + `instances_default.json`) that you upload/export through the CVAT UI;
-`cvat-import <exported.json> --task-dir work/cvat_staging/<name>` reads it back.
-
-Three correctness details the ingest handles, because CVAT's export differs from
-what we sent:
-
-- **Category remap by name.** CVAT assigns its own category ids by label order;
-  we remap by *name* back to the config's canonical ids.
-- **Polygon ↔ RLE.** With `conv_mask_to_poly: true`, annotators edit polygons;
-  the export then carries polygons, which we re-rasterize to RLE so downstream
-  stays uniform.
-- **Void/ignore.** A `void` label (added to each task when `add_void_label:
-  true`) is *dropped* on ingest, leaving those pixels as background rather than
-  forcing a class.
-
-**Networking:** if CVAT runs via its own compose on the same host, the simplest
-setup is `network_mode: host` on our `extract` service with
-`cvat.host: http://localhost:8080` (commented in `docker-compose.yml`);
-otherwise join CVAT's docker network and use `http://cvat_server:8080`.
-
-**Active learning:** later rounds swap SAM 3 for your trained model as the
-pre-labeler; `cvat-push`/`cvat-pull` are unchanged.
 
 ## Testing
 

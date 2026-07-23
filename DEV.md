@@ -8,25 +8,28 @@ the four in the [README](README.md): rosbag → SAM 3 → CVAT → COCO.
 | Stage | State |
 |-------|-------|
 | Backbone (config, manifest, IDs, COCO) | ✅ implemented + unit-tested |
-| 1 — rosbag extract | ✅ verified on a real **ROS 1** `.bag`; ⚠️ **ROS 2 unverified** |
+| 1 — rosbag extract | ✅ verified on real **ROS 1** `.bag` **and ROS 2** `.db3`; ⚠️ ROS 2 `.mcap` / `CompressedImage` still untried |
 | 2 — SAM 3 autolabel | ✅ verified end to end on real gated weights (RTX 4090) |
-| 3 — CVAT round-trip | ⚠️ **unverified** — written + unit-tested, never run on a live server |
+| 3 — CVAT round-trip | ✅ full push→correct→pull verified on live CVAT v2.70.0 (20 frames) |
 | 4 — package + splits | ✅ implemented + unit-tested |
 
 Offline test suite (`pytest -q`) is green: 4 end-to-end tests, no GPU/weights.
 
-**The two open verifications** (everything else has been exercised on real data):
+**The remaining open verifications** (most has now been exercised on real data):
 
-1. **Stage 1 against a ROS 2 bag** (`.mcap` / `.db3`) — only ROS 1 `.bag` has been
-   run. `rosbags`' `AnyReader` is meant to abstract the difference, and the ROS
-   1/ROS 2 `CameraInfo` casing split is already handled (`_ci_field`), but none of
-   it has touched a real ROS 2 bag: topic naming, `CompressedImage` decode, and
-   the stamp source are all unconfirmed there.
-2. **Stage 3 CVAT, end to end on a live server** — `cvat-push`/`cvat-pull` and the
-   ingest are written and unit-tested against a *simulated* export, so the parts
-   most likely to bite (auth, `project_id`/label setup, network reachability from
-   the container, and whether a real export matches the fixture's shape) are all
-   still unknown.
+1. **Stage 1 ROS 2 loose ends** — a real ROS 2 `.db3` bag now extracts end to end
+   (`camera_lidar_20260721_093621`: raw `Image` decode, lowercase `k/d/p`
+   `CameraInfo`, bag-record stamp — all confirmed). Two ROS 2 sub-cases remain
+   untried: a `.mcap`-backed bag, and `CompressedImage` decode (this bag carried
+   raw `Image`). Note ROS 2 `.db3` bags need a `default_typestore`
+   (`extract.ros2_typestore`, default `ROS2_HUMBLE`) since they carry no embedded
+   type defs.
+2. **Stage 3 CVAT — done.** Full `cvat-push` → correct in the UI → `cvat-pull`
+   verified on a live CVAT v2.70.0 (20 frames → `corrected`). Real gotcha the
+   fixture missed: CVAT's COCO export uses *uncompressed* RLE (`counts` as an int
+   list), which `rle_to_mask` now compresses before decode (regression-tested).
+   Remaining Stage 4 loose end: `package` has still not run on a corrected dataset
+   (now unblocked).
 
 ## Gotchas worth not rediscovering
 
@@ -102,12 +105,14 @@ docker compose -f docker/docker-compose.yml run --rm --user root \
 
 ## TODO — verification on real inputs
 
-- [ ] **Stage 1 on a ROS 2 bag** (`.mcap` and `.db3`) — the #1 open item. ROS 1 is
-      done; ROS 2 has never been run. Confirm `AnyReader` opens both layouts,
-      `Image`/`CompressedImage` decode, the stamp used for the frame id, and that
-      `CameraInfo` capture survives the lowercase `k/d/p` casing. Candidates already
-      on this box: `perception_stack_ros2/src/bags/b2_stationary/` (`.db3`) and
-      `htc_vive_pro2_socket/rosbags/teleop/` (`.mcap`) — point `DL_BAGS_DIR` at one.
+- [x] **Stage 1 on a ROS 2 `.db3` bag** (`camera_lidar_20260721_093621`): raw
+      `Image` decode, lowercase `k/d/p` `CameraInfo`, bag-record stamp all confirmed.
+      Needed two fixes: `bag_files` now discovers ROS 2 bag *directories* (not just
+      `.bag` globs), and `AnyReader` gets a `default_typestore` (ROS 2 `.db3` bags
+      carry no embedded type defs). Static scene → phash kept 1 of 590 (correct).
+- [ ] **Stage 1 ROS 2 loose ends**: a `.mcap`-backed bag, and `CompressedImage`
+      decode (the `.db3` above carried raw `Image`). Candidate `.mcap` on this box:
+      `htc_vive_pro2_socket/rosbags/teleop/` — point `DL_BAGS_DIR` at it.
 - [ ] **Stage 3 CVAT, against a live server** — the #2 open item. Stand up CVAT (its
       own compose), then `cvat-push` → correct in the UI → `cvat-pull`. Confirm on a
       *real* export what the fixture only simulates: name-based category remap,
@@ -129,8 +134,12 @@ docker compose -f docker/docker-compose.yml run --rm --user root \
       moving > `trans_m` / rotating > `rot_deg`. Currently falls back to interval.
 - [ ] Offline Stage 1 test: synthesize a tiny rosbag fixture (via `rosbags`
       writer) so extraction gets end-to-end coverage without a real bag.
-- [ ] CVAT networking: wire `network_mode: host` (or join CVAT's network)
-      concretely and document the working `cvat.host` value.
+- [x] CVAT networking: `extract` uses `network_mode: host`, config `cvat.host` is
+      `http://localhost:8080`. `docker/cvat.sh` clones + runs the CVAT server.
+      **Reachability + SDK auth from the extract container verified** (CVAT
+      v2.70.0). Gotcha: CVAT's traefik only routes `/api/` for the localhost Host
+      header — `host.docker.internal` 404s, which is why host networking (Host =
+      localhost) rather than an `extra_hosts` mapping.
 - [ ] Capture LiDAR + TF alongside camera_info for the downstream projection use
       mentioned in the original design.
 - [ ] Active-learning loop: swap SAM 3 for a trained model as the pre-labeler in

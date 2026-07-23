@@ -45,14 +45,19 @@ services:
       - /etc/passwd:/etc/passwd:ro   # so the container uid has a name
       - /etc/group:/etc/group:ro
     working_dir: /app
-    # cvat-push/pull reach the CVAT server over HTTP. If CVAT runs via its own
-    # compose on this host, either use host networking (below) and host=
-    # http://localhost:8080, or join CVAT's external network instead.
+    # Host networking so Stage 3 cvat-push/pull can reach the CVAT server that
+    # ./cvat.sh runs on the host at localhost:8080. It must be *localhost*, not
+    # host.docker.internal: CVAT sits behind traefik, which only routes /api/
+    # for the host it was configured with (localhost by default) -- any other
+    # Host header 404s. Host networking makes the container's localhost the
+    # host's, so the URL and the Host header both say localhost. Stages 1/4 need
+    # no network, so this is harmless for them. (Linux; on Docker Desktop use
+    # host.docker.internal AND set CVAT_HOST accordingly on the CVAT side.)
+    network_mode: host
     environment:
       - CVAT_USER
       - CVAT_PASSWORD
       - HOME=/tmp
-    # network_mode: host
 
   sam3:
     <<: *runas

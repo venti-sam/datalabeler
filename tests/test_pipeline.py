@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 from datalabeler.config import load_config
-from datalabeler.coco import load_coco, rle_to_mask, seg_to_mask
+from datalabeler.coco import load_coco, rle_to_mask, seg_to_mask, seg_to_rle
 from datalabeler.manifest import AUTO, CORRECTED, EXTRACTED, Frame, Manifest
 from datalabeler.stages.autolabel import Sam3Backend, autolabel
 from datalabeler.stages.cvat import ingest_coco
@@ -148,6 +148,20 @@ def _fake_cvat_export(frame_ids):
              "segmentation": [[30, 30, 40, 30, 40, 40, 30, 40]], "iscrowd": 0},
         ],
     }
+
+
+def test_rle_to_mask_handles_uncompressed_counts():
+    # CVAT's COCO export can carry uncompressed RLE (counts as an int run-length
+    # list) instead of the compressed byte string pycocotools.decode expects.
+    # size [h, w] = [2, 2]; column-major runs "0 zeros, 2 ones, 2 zeros" set the
+    # left column.
+    uncompressed = {"size": [2, 2], "counts": [0, 2, 2]}
+    m = rle_to_mask(uncompressed)
+    assert np.array_equal(m, np.array([[1, 0], [1, 0]], dtype=np.uint8))
+    # seg_to_rle must normalize it to a JSON-safe compressed RLE that round-trips.
+    rle = seg_to_rle(uncompressed, 2, 2)
+    assert isinstance(rle["counts"], str)
+    assert np.array_equal(seg_to_mask(rle, 2, 2), m)
 
 
 def test_stage3_ingest_remaps_by_name_and_drops_void(project):

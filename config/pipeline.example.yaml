@@ -2,10 +2,12 @@
 # Paths may reference ${workdir}; it is expanded at load time.
 
 paths:
-  # One or more bag paths or globs. ROS 1 (.bag) and ROS 2 (.db3/.mcap) both
-  # work via the `rosbags` package — no sourced ROS install needed.
+  # One or more bag paths, globs, or a directory. ROS 1 (a `.bag` file) and
+  # ROS 2 (a directory holding metadata.yaml + `.db3`/`.mcap`) both work via the
+  # `rosbags` package — no sourced ROS install. Point at a folder and every bag
+  # of either kind inside it is discovered; or name a specific bag / glob.
   bags:
-    - "data/bags/*.bag"
+    - "data/bags/"
   workdir: "work"
   images: "${workdir}/extracted_rosbag_images"   # Stage 1 output
   annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
@@ -35,6 +37,11 @@ extract:
   image_format: "jpg"         # jpg | png
   jpeg_quality: 92
   capture_camera_info: true   # store intrinsics per topic if present in the bag
+  # ROS 2 only: bags recorded without embedded type definitions need a typestore
+  # for the recording distro to deserialize. Standard msgs are identical across
+  # distros, so this rarely matters unless the bag carries custom message types.
+  # ROS 1 bags ignore it. One of the rosbags ROS2_* stores (DASHING..LYRICAL).
+  ros2_typestore: "ROS2_HUMBLE"
 
 # ------------------------------------------------------- Stages 2 & 4 map ----
 # Canonical class table. category_id is the COCO id used end to end.
@@ -63,9 +70,12 @@ autolabel:
   max_instances: 100
 
 # ---------------------------------------------------------- Stage 3 (CVAT) ---
-# CVAT runs as its OWN docker-compose stack (github.com/cvat-ai/cvat). We talk
-# to it over HTTP via cvat-sdk. Put credentials in env vars, not here.
-cvat:
+# CVAT runs as its OWN docker-compose stack (github.com/cvat-ai/cvat), started
+# by `docker/cvat.sh up`. We talk to it over HTTP via cvat-sdk. Put credentials
+# in env vars, not here.
+  # localhost works from the extract container because it uses host networking
+  # (docker-compose.yml network_mode: host); CVAT's traefik only routes /api/
+  # for the localhost Host header, so host.docker.internal would 404.
   host: "http://localhost:8080"   # CVAT server URL
   username_env: "CVAT_USER"       # env var holding the username
   password_env: "CVAT_PASSWORD"   # env var holding the password

@@ -1,5 +1,7 @@
 # Pipeline working data (source bags & derived artifacts live outside git)
 work/
+# bags of any layout, incl. ROS 2 dirs (metadata.yaml + .db3/.mcap inside)
+data/bags/
 *.bag
 *.db3
 *.mcap

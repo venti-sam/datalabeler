@@ -10,6 +10,7 @@ from pathlib import Path
 
 import cv2
 from rosbags.highlevel import AnyReader
+from rosbags.typesys import Stores, get_typestore
 from tqdm import tqdm
 
 from ..config import Config
@@ -21,6 +22,20 @@ from ..manifest import EXTRACTED, Frame, Manifest
 def _msgtype(conn) -> str:
     # rosbags Connection exposes the message type on .msgtype
     return getattr(conn, "msgtype", "")
+
+
+def _typestore(cfg: Config):
+    # ROS 2 bags recorded without embedded type definitions (the common case for
+    # sqlite3 bags) can't be deserialized unless we hand rosbags a typestore for
+    # the recording distro. Standard msgs (sensor_msgs, ...) are identical across
+    # distros, so the default is fine unless the bag carries custom types.
+    name = cfg.extract.get("ros2_typestore", "ROS2_HUMBLE")
+    try:
+        return get_typestore(Stores[name])
+    except KeyError:
+        raise SystemExit(
+            f"unknown extract.ros2_typestore '{name}'; "
+            f"options: {', '.join(s.name for s in Stores)}")
 
 
 def _decode(msg, msgtype: str):
@@ -81,12 +96,13 @@ def extract(cfg: Config) -> dict[str, int]:
     bags = cfg.bag_files
     if not bags:
         raise SystemExit("no bags matched paths.bags")
+    typestore = _typestore(cfg)
 
     with Manifest(cfg.path("manifest")) as mani:
         for bag in bags:
             last_stamp: dict[str, int] = {}   # per topic
             last_hash: dict[str, int] = {}    # per topic
-            with AnyReader([bag]) as reader:
+            with AnyReader([bag], default_typestore=typestore) as reader:
                 conns = [c for c in reader.connections if c.topic in topics]
                 ci_conns = [c for c in reader.connections
                             if "CameraInfo" in _msgtype(c)] if capture_ci else []

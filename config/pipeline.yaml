@@ -3,7 +3,7 @@
 
 paths:
   bags:
-    - "/app/data/bags/*.bag"
+    - "/app/data/bags/"
   workdir: "/app/work"
   images: "${workdir}/extracted_rosbag_images"   # Stage 1 output
   annotations: "${workdir}/coco_annotations"      # canonical per-frame COCO (stages 2-3)
@@ -15,26 +15,29 @@ paths:
 # ---------------------------------------------------------------- Stage 1 ----
 extract:
   topics:
-    - "/camera/color/image_raw"
+    - "/camera/camera/color/image_raw"   # ROS 2 bag camera_lidar_20260721_093621
   sampling:
-    strategy: "phash"
+    strategy: "interval"
     interval_sec: 1.0
     phash_threshold: 8
     odom_topic: "/odom"
     trans_m: 0.25
     rot_deg: 15.0
-  image_format: "jpg"
-  jpeg_quality: 92
+  # Lossless label master: annotate/auto-label on artifact-free pixels. Masks are
+  # geometry, so they stay valid on the compressed frames used at inference —
+  # match that compression at train time (e.g. JPEG augmentation in the loader).
+  image_format: "png"
+  jpeg_quality: 92          # unused for png; kept for a jpg switch-back
   capture_camera_info: true
 
 # ------------------------------------------------------- Stages 2 & 4 map ----
 classes:
-  - name: "grass"
+  - name: "leaves"
     id: 1
-    prompts: ["grass"]
-  - name: "mannequin"
+    prompts: ["leaves", "foliage"]
+  - name: "table"
     id: 2
-    prompts: ["mannequin", "person"]
+    prompts: ["table", "desk"]
   - name: "pipe"
     id: 3
     # Each prompt is one *concept*, run separately. A conjunction is two, and
@@ -44,7 +47,27 @@ classes:
     # (but note nothing dedupes across prompts: overlapping hits become doubles).
     prompts: ["metal pipe"]
 
-priority: ["mannequin", "pipe", "grass"]
+priority: ["table", "pipe", "leaves"]
+
+
+# FOR ACTUAL DATA COLLECTION LABELLING CLASSES 
+# classes:
+#   - name: "grass"
+#     id: 1
+#     prompts: ["grass"]
+#   - name: "mannequin"
+#     id: 2
+#     prompts: ["mannequin", "person"]
+#   - name: "pipe"
+#     id: 3
+#     # Each prompt is one *concept*, run separately. A conjunction is two, and
+#     # matches nothing: "horizontal and vertical metal pipe" scored 0 masks here
+#     # where plain "metal pipe" gets 8 -- it covers both orientations precisely by
+#     # naming neither. Span distinct concepts with more list entries, not "A and B"
+#     # (but note nothing dedupes across prompts: overlapping hits become doubles).
+#     prompts: ["metal pipe"]
+
+# priority: ["mannequin", "pipe", "grass"]
 
 # ---------------------------------------------------------------- Stage 2 ----
 autolabel:
@@ -57,6 +80,9 @@ autolabel:
 
 # ---------------------------------------------------------- Stage 3 (CVAT) ---
 cvat:
+  # localhost works because the extract service uses host networking (see
+  # docker-compose.yml network_mode: host); CVAT's traefik only routes /api/
+  # for the localhost Host header.
   host: "http://localhost:8080"
   username_env: "CVAT_USER"
   password_env: "CVAT_PASSWORD"

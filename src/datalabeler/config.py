@@ -36,11 +36,43 @@ class Config:
 
     @property
     def bag_files(self) -> list[Path]:
+        """Resolve `paths.bags` to concrete bag paths, ROS 1 and ROS 2 alike.
+
+        A ROS 1 bag is a single `.bag` (or `.mcap`) file; a ROS 2 bag is a
+        *directory* holding `metadata.yaml` + its `.db3`/`.mcap`. Each configured
+        entry may point straight at a bag, be a glob, or be a directory that
+        *contains* bags -- in that last case we discover the `.bag` files and
+        ROS 2 bag dirs one level inside it, so `paths.bags: [data/bags/]` picks up
+        whatever kind of bag you dropped in there.
+        """
         out: list[Path] = []
+        seen: set[Path] = set()
+
+        def add(p: Path) -> None:
+            rp = p.resolve()
+            if rp not in seen:
+                seen.add(rp)
+                out.append(rp)
+
+        def take(p: Path) -> None:
+            if p.is_file() and p.suffix in (".bag", ".mcap"):
+                add(p)                                   # ROS 1 bag / standalone mcap
+            elif p.is_dir() and (p / "metadata.yaml").is_file():
+                add(p)                                   # ROS 2 bag directory
+            elif p.is_dir():
+                # A directory of bags: look one level in for either kind.
+                for child in sorted(p.iterdir()):
+                    if child.is_file() and child.suffix in (".bag", ".mcap"):
+                        add(child)
+                    elif child.is_dir() and (child / "metadata.yaml").is_file():
+                        add(child)
+
         for pattern in self.paths["bags"]:
             pat = pattern if Path(pattern).is_absolute() else str(self.root / pattern)
-            out.extend(Path(p) for p in sorted(glob.glob(pat)))
-        return out
+            matches = sorted(glob.glob(pat))
+            for m in matches:
+                take(Path(m))
+        return sorted(out)
 
     @property
     def classes(self) -> list[ClassDef]:

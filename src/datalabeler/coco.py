@@ -39,9 +39,16 @@ def mask_to_rle(mask: np.ndarray) -> dict:
 
 
 def rle_to_mask(rle: dict) -> np.ndarray:
-    r = dict(rle)
-    if isinstance(r["counts"], str):
-        r = {**r, "counts": r["counts"].encode("ascii")}
+    counts = rle["counts"]
+    if isinstance(counts, list):
+        # Uncompressed RLE (counts is a run-length list) -- e.g. some CVAT COCO
+        # exports. pycocotools.decode wants compressed counts, so compress first.
+        h, w = rle["size"]
+        r = mask_utils.frPyObjects(rle, h, w)
+    elif isinstance(counts, str):
+        r = {**rle, "counts": counts.encode("ascii")}
+    else:
+        r = rle
     return mask_utils.decode(r).astype(np.uint8)
 
 

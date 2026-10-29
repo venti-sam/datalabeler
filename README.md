@@ -19,12 +19,12 @@ manifest, so each can run in its own environment and be re-run independently.
 | 1 — rosbag extract | ✅ **ROS 1** `.bag` **and ROS 2** `.db3` — ⚠️ ROS 2 `.mcap` / `CompressedImage` not yet checked |
 | 2 — SAM 3 autolabel | ✅ end to end on the real gated weights (RTX 4090) |
 | 3 — CVAT round-trip | ✅ full push→correct→pull verified on a live server (CVAT v2.70.0, 20 frames) |
-| 4 — package + splits | ✅ unit-tested (not yet run on a corrected dataset) |
+| 4 — package + splits | ✅ run on the corrected dataset (20 frames) |
 
-Stages 1–3 have now run end to end on real data. Remaining gaps: ROS 2
+All four stages have now run end to end on real data. Remaining gaps: ROS 2
 `.mcap`/`CompressedImage` extraction (only `.db3` + raw `Image` checked), and
-Stage 4 packaging on a real corrected dataset (now unblocked — 20 frames are
-`corrected`). See [DEV.md](DEV.md) for specifics.
+val/test splits — splitting is by-bag, so a single bag lands entirely in `train`;
+you need ≥2 bags to populate val/test. See [DEV.md](DEV.md) for specifics.
 
 ## Design backbone
 
@@ -104,9 +104,10 @@ resumable: re-running skips frames already recorded.
 ```bash
 cp config/pipeline.example.yaml config/pipeline.yaml   # edit topics / classes / prompts / paths
 cp docker/.env.example docker/.env                     # set HF_TOKEN (+ CVAT_USER/PASSWORD, DL_BAGS_DIR if needed)
-# put bags under data/bags/ — or set DL_BAGS_DIR in docker/.env to a directory
-# elsewhere (a symlink into data/bags will NOT work: it resolves to a host path
-# the container hasn't mounted)
+# put bags under data/bags/ — a ROS 1 .bag file or a ROS 2 bag directory
+# (metadata.yaml + .db3/.mcap); both kinds are auto-discovered. Or point
+# DL_BAGS_DIR in docker/.env at a directory elsewhere (a symlink into data/bags
+# will NOT work: it resolves to a host path the container hasn't mounted).
 cd docker && ./build.sh                                # no arg = build both images
 ```
 
@@ -117,6 +118,13 @@ cd docker && ./build.sh                                # no arg = build both ima
 datalabeler extract      # bags → sampled frames in work/extracted_rosbag_images/, rows @ status=extracted
 datalabeler status       # sanity-check the counts, any time
 ```
+
+Reads ROS 1 and ROS 2 bags alike. ROS 2 `.db3` bags carry no embedded type defs,
+so extraction uses a typestore — `extract.ros2_typestore` (default `ROS2_HUMBLE`);
+set it to your recording distro only if a custom message type won't deserialize.
+Frames are saved lossless (`extract.image_format: png`) so annotators and SAM 3
+see artifact-free pixels — masks are geometry, so they stay valid on the
+compressed frames you infer on later.
 
 **Stage 2 — SAM 3 auto-label** (`sam3` container, GPU):
 
@@ -222,7 +230,7 @@ docker compose down --rmi all -v                # -v ALSO deletes annotations �
 ```
 packaged_dataset/
 ├── train|val|test/
-│   ├── images/              JPEG frames
+│   ├── images/              frames (png/jpg, per extract.image_format)
 │   ├── masks/               indexed-PNG semantic masks (0=void), optional
 │   └── annotations/instances.json   merged COCO (RLE instances)
 ├── categories.json
@@ -231,7 +239,10 @@ packaged_dataset/
 
 Splits are assigned **by bag** (`package.split.by`), never randomly — random
 splits leak near-duplicate video frames across train/val/test and inflate
-metrics.
+metrics. The flip side: a whole bag goes to one split, so a single bag lands
+entirely in `train` (`val`/`test` stay empty until you have ≥2 bags). The
+indexed-PNG masks store class ids (0=void, 1, 2, …), so they look near-black on
+screen — that's the encoding, not empty masks.
 
 ## Testing
 
@@ -242,8 +253,9 @@ pytest -q                          # offline: no GPU, no SAM 3 weights
 
 `tests/test_pipeline.py` injects a fake segmentation backend and a simulated
 CVAT export to exercise Stage 2 → 3 → 4 end to end (COCO RLE round-trip,
-name-based category remap, void drop, polygon→RLE, semantic-priority flatten,
-splits). The **real** SAM 3 check runs inside the GPU container (`./join.sh sam3`;
+name-based category remap, void drop, polygon→RLE and uncompressed-RLE decode,
+semantic-priority flatten, splits). The **real** SAM 3 check runs inside the GPU
+container (`./join.sh sam3`;
 the gated weights download using the `HF_TOKEN` from `docker/.env`):
 
 ```bash
@@ -264,10 +276,7 @@ is stubbed and falls back to interval.
 
 - Stage 2 supports two backends: `sam3` (facebookresearch/sam3, the default —
   `build_sam3_image_model` → `Sam3Processor` → text prompt) and `ultralytics`.
-  Verified offline with a fake backend; run `scripts/smoke_sam3.py` for the real
-  model check (needs GPU + HF access).
 - `motion` sampling needs odom time-sync (not yet implemented; falls back to
   interval).
-- Not yet exercised on real inputs here: an actual rosbag through Stage 1 and
-  the real SAM 3 weights (gated download). The code paths are written and unit-
-  covered but unrun on real data.
+- Still untried on ROS 2: `.mcap`-backed bags and `CompressedImage` decode (the
+  verified `.db3` bag carried raw `Image`).
